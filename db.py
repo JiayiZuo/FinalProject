@@ -1,9 +1,9 @@
 from functools import wraps
 
-import app
 from flask import jsonify
 import pymysql
 from pymysql.cursors import DictCursor
+from pymongo import MongoClient, ASCENDING, DESCENDING
 
 # MySQL 数据库配置
 # app.config['MYSQL_HOST'] = 'localhost'
@@ -17,11 +17,10 @@ def get_db_connection():
     return pymysql.connect(
         host='127.0.0.1',
         user='root',
-        password='Zuoyi980215!',
+        password='{your password}',
         database='medibot',
         cursorclass=DictCursor
     )
-
 
 def db_query(transaction=False, readonly=False):
     def decorator(func):
@@ -49,4 +48,36 @@ def db_query(transaction=False, readonly=False):
 
         return wrapper
 
+    return decorator
+
+# def get_mongo_connection():
+#     client = MongoClient("mongodb://localhost:27017/")
+#     return client('medibot')
+#
+# def init_mongo():
+#     # 问诊会话集合
+#     mongo = get_mongo_connection()
+#     consultation_sessions = mongo['consultation_sessions']
+#
+#     # 创建索引
+#     consultation_sessions.create_index([('user_id', ASCENDING)])
+#     consultation_sessions.create_index([('start_time', DESCENDING)])
+#     consultation_sessions.create_index([('user_id', ASCENDING), ('status', ASCENDING)])
+
+def mongodb_connection(db_name='medibot'):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            client = MongoClient("mongodb://localhost:27017/")
+            db = client[db_name]
+
+            try:
+                result = func(db, *args, **kwargs)
+                return result
+            except Exception as e:
+                print(f"数据库操作出错: {str(e)}")
+                raise
+            finally:
+                client.close()
+        return wrapper
     return decorator

@@ -1,3 +1,12 @@
+import hashlib
+
+def hash_password_sha256(password):
+    # 使用 SHA-256 哈希算法
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def verify_password_sha256(stored_password_hash, password):
+    return stored_password_hash == hash_password_sha256(password)
+
 def validate_user_data(update_data):
     errors = {}
     valid_data = {}
@@ -33,3 +42,8 @@ def validate_user_data(update_data):
         except ValueError:
             errors['weight'] = "Must be decimal"
     return valid_data, errors
+
+
+def serialize_document(document):
+    document['_id'] = str(document['_id'])
+    return document
