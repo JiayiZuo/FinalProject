@@ -1,10 +1,16 @@
 from flask import Flask, jsonify, request
-from db import db_query, mongodb_connection
+from db_connection import db_query, mongodb_connection, redis_connection
 from pymongo import DESCENDING
 from datetime import datetime
 from utils import validate_user_data, serialize_document, hash_password_sha256, verify_password_sha256
+from constant import *
+from config import *
+import requests, json
+from celery import Celery
 app = Flask(__name__)
 
+celery = Celery(app.name, broker=CELERY_BROKER_URL)
+celery.conf.update(app.config)
 
 @app.route('/userinfo/createuser', methods=['POST'])
 @db_query(transaction=False)  # Changed to True for data integrity
@@ -208,6 +214,119 @@ def get_consultation(mongo):
     return jsonify({
         "status": "success",
         "data": data
+    })
+
+@app.route('/info/articles', methods=['GET'])
+@redis_connection
+def get_healthy_articles(redis):
+    keyword = request.args.get('keyword', '')
+    if keyword == '':
+        articles_cache = redis.get('healthy_articles')
+        if articles_cache is not None:
+            articles_cache = json.loads(articles_cache)
+            return jsonify({
+                'status': 'success',
+                'data': {
+                    'articles': articles_cache,
+                    'count': len(articles_cache)
+                },
+                'messages': 'Get health articles successful'
+            })
+
+    params = {
+        'keyword': keyword,
+    }
+
+    try:
+        response = requests.get(HEALTHY_MESSAGE_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+
+        if data['Result']['Error'] != 'False':
+            return jsonify({
+                'status': 'error',
+                'data': {},
+                'messages': 'Get health articles failed'
+            }), 200
+
+        resources = data['Result']['Resources']['Resource']
+        articles = []
+        for resource in resources:
+            article_info = {
+                'category': resource['Categories'],
+                'title': resource['Title'],
+                'picture': resource['ImageUrl'],
+                'url': resource['AccessibleVersion'],
+            }
+            articles.append(article_info)
+        if keyword == '':
+            redis.set('healthy_articles', json.dumps(articles), ex=HEALTH_NEWS_CACHE_TTL)
+
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'articles': articles,
+                'count': len(articles)
+            },
+            'messages': 'Get health articles successful'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@app.route('/reminder/create', methods=['POST'])
+@db_query(transaction=False)
+def medicine_reminder_create(**kwargs):
+    data = request.json
+    required_fields = ['user_id', 'medicine_name', 'reminder_times']
+
+    if not all(field in data for field in required_fields):
+        return jsonify({
+            'status': 'error',
+            'data': {},
+            'message': 'missing required fields'
+        })
+
+    times = data['reminder_times'].split(',')
+    try:
+        for t in times:
+            # time format (HH:MM)
+            time_str = t.strip()
+            if len(time_str) != 5 or time_str[2] != ':':
+                raise ValueError
+            hour = int(time_str[:2])
+            minute = int(time_str[3:])
+            if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                raise ValueError
+    except ValueError:
+        return jsonify({
+            'status': 'error',
+            'data': {},
+            'message': 'invalid time format，using HH:MM format（example 08:00）'
+        })
+
+    cursor = kwargs['cursor']
+    insert_data = {
+        'user_id': data['user_id'],
+        'medicine_name': data['medicine_name'],
+        'reminder_times': data['reminder_times'],
+        'start_date': data.get('start_time', datetime.now()),
+        'end_date': data.get('end_date', datetime.now()),
+        'is_active': 1
+    }
+    placeholders = ', '.join(['%s'] * len(insert_data))
+    columns = ', '.join(insert_data.keys())
+    sql = f"INSERT INTO medication_reminder ({columns}) VALUES ({placeholders})"
+
+    cursor.execute(sql, list(insert_data.values()))
+    reminder_times = data['reminder_times'].split(',')
+
+    return jsonify({
+        'status': 'success',
+        'data': {
+            'user_id': data['user_id'],
+            'reminder_times': reminder_times,
+        },
+        'message': 'create reminder successful'
     })
 
 if __name__ == '__main__':

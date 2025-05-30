@@ -1,25 +1,20 @@
 from functools import wraps
 
-from flask import jsonify
+from flask import jsonify, g
 import pymysql
 from pymysql.cursors import DictCursor
-from pymongo import MongoClient, ASCENDING, DESCENDING
+from pymongo import MongoClient, ASCENDING, DESCENDING, timeout
+import redis
+from config import *
 
-# MySQL 数据库配置
-# app.config['MYSQL_HOST'] = 'localhost'
-# app.config['MYSQL_USER'] = 'your_username'
-# app.config['MYSQL_PASSWORD'] = 'your_password'
-# app.config['MYSQL_DB'] = 'your_database'
-# app.config['MYSQL_CURSORCLASS'] = 'DictCursor'
-
-# 初始化数据库连接
+# init mysql connection
 def get_db_connection():
     return pymysql.connect(
-        host='127.0.0.1',
-        user='root',
-        password='{your password}',
-        database='medibot',
-        cursorclass=DictCursor
+        host = MYSQL_HOST,
+        user = MYSQL_USER,
+        password = MYSQL_PASSWORD,
+        database = MYSQL_DB,
+        cursorclass = DictCursor
     )
 
 def db_query(transaction=False, readonly=False):
@@ -68,7 +63,7 @@ def mongodb_connection(db_name='medibot'):
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            client = MongoClient("mongodb://localhost:27017/")
+            client = MongoClient(MONGODB_CLIENT)
             db = client[db_name]
 
             try:
@@ -81,3 +76,17 @@ def mongodb_connection(db_name='medibot'):
                 client.close()
         return wrapper
     return decorator
+
+# 初始化 Redis 连接
+def get_redis():
+    if 'redis' not in g:
+        g.redis = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
+    return g.redis
+
+# Redis 装饰器
+def redis_connection(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        redis_conn = get_redis()
+        return f(redis_conn, *args, **kwargs)
+    return decorated_function

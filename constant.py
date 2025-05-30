@@ -1,0 +1,1 @@
+HEALTHY_MESSAGE_URL = "https://health.gov/myhealthfinder/api/v4/topicsearch.json"
