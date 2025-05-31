@@ -309,7 +309,7 @@ def medicine_reminder_create(**kwargs):
         'user_id': data['user_id'],
         'medicine_name': data['medicine_name'],
         'reminder_times': data['reminder_times'],
-        'start_date': data.get('start_time', datetime.now()),
+        'start_date': data.get('start_date', datetime.now()),
         'end_date': data.get('end_date', datetime.now()),
         'is_active': 1
     }
@@ -328,6 +328,167 @@ def medicine_reminder_create(**kwargs):
         },
         'message': 'create reminder successful'
     })
+
+@app.route('/reminder/get', methods=['GET'])
+@db_query(transaction=False)
+def medicine_reminder_get(**kwargs):
+    cursor = kwargs['cursor']
+    user_id = request.args.get('user_id', '')
+    reminder_id = request.args.get('reminder_id', '')
+    if not user_id and not reminder_id:
+        return jsonify({
+            'status': 'error',
+            'data': {},
+            'message': 'user_id or reminder_id need to be provided'
+        })
+    if user_id and reminder_id:
+        cursor.execute("SELECT * FROM medication_reminder WHERE user_id = %s and id = %s", (user_id, reminder_id))
+        reminder = cursor.fetchall()
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'reminder': reminder,
+                'count': len(reminder)
+            },
+            'message': 'reminder found by current user'
+        })
+
+    if user_id:
+        cursor.execute("SELECT * FROM medication_reminder WHERE user_id = %s", (user_id,))
+        reminder = cursor.fetchall()
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'reminder': reminder,
+                'count': len(reminder)
+            },
+            'message': 'reminder found by current user'
+        })
+
+    if reminder_id:
+        cursor.execute("SELECT * FROM medication_reminder WHERE id = %s", (reminder_id,))
+        reminder = cursor.fetchone()
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'reminder': reminder,
+                'count': 1
+            },
+            'message': 'reminder found by reminder_id'
+        })
+
+@app.route('/reminder/update', methods=['POST'])
+@db_query(transaction=False)
+def medicine_reminder_update(**kwargs):
+    data = request.json
+    cursor = kwargs['cursor']
+    reminder_id = data['reminder_id']
+
+    cursor.execute("SELECT * FROM medication_reminder WHERE id = %s", (reminder_id,))
+    reminder = cursor.fetchone()
+
+    if not reminder:
+        return jsonify({
+            'status': 'error',
+            'data': {},
+            'message': 'reminder not found'
+        })
+
+    if 'reminder_times' in data:
+        times = data['reminder_times'].split(',')
+        try:
+            for t in times:
+                time_str = t.strip()
+                if len(time_str) != 5 or time_str[2] != ':':
+                    raise ValueError
+                hour = int(time_str[:2])
+                minute = int(time_str[3:])
+                if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+                    raise ValueError
+        except ValueError:
+            return jsonify({
+                'status': 'error',
+                'data': {},
+                'message': 'invalid time format，using HH:MM format（example 08:00）'
+            })
+
+    update_fields = []
+    update_values = []
+
+    updatable_fields = [
+        'medicine_name', 'reminder_times', 'dosage', 'frequency',
+        'start_date', 'end_date', 'is_active'
+    ]
+
+    for field in updatable_fields:
+        if field in data:
+            update_fields.append(f"{field} = %s")
+            update_values.append(data[field])
+
+    try:
+        update_fields.append("updated_at = %s")
+        update_values.append(datetime.now())
+
+        update_values.append(reminder_id)
+
+        set_clause = ", ".join(update_fields)
+        sql = f"UPDATE medication_reminder SET {set_clause} WHERE id = %s"
+
+        cursor.execute(sql, update_values)
+
+        cursor.execute("SELECT * FROM medication_reminder WHERE id = %s", (reminder_id,))
+        updated_reminder = cursor.fetchone()
+
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'id': updated_reminder['id'],
+                'medicine_name': updated_reminder['medicine_name'],
+                'reminder_times': updated_reminder['reminder_times'].split(','),
+                'is_active': bool(updated_reminder['is_active'])
+            },
+            'message': 'reminder updated successfully'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'data': {},
+            'message': e
+        })
+
+@app.route('/reminder/delete', methods=['POST'])
+@db_query(transaction=True)
+def medicine_reminder_delete(**kwargs):
+    cursor = kwargs['cursor']
+    reminder_id = request.json['reminder_id']
+
+    cursor.execute("SELECT * FROM medication_reminder WHERE id = %s", (reminder_id,))
+    reminder = cursor.fetchone()
+
+    if not reminder:
+        return jsonify({
+            'status': 'error',
+            'data': {},
+            'message': 'reminder not found'
+        })
+
+    try:
+        cursor.execute("DELETE FROM medication_reminder WHERE id = %s", (reminder_id,))
+
+        return jsonify({
+            'status': 'success',
+            'data': {
+                'deleted_id': reminder_id
+            },
+            'message': 'reminder deleted successfully'
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'data': {},
+            'message': e
+        })
+
 
 if __name__ == '__main__':
     app.run()
