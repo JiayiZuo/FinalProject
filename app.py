@@ -5,12 +5,19 @@ from datetime import datetime
 from utils import validate_user_data, serialize_document, hash_password_sha256, verify_password_sha256
 from constant import *
 from config import *
-import requests, json
+import requests, json, re
 from celery import Celery
+from flask_mail import Mail
 app = Flask(__name__)
 
-celery = Celery(app.name, broker=CELERY_BROKER_URL)
-celery.conf.update(app.config)
+app.config['MAIL_SERVER'] = MAIL_SERVER
+app.config['MAIL_PORT'] = MAIL_PORT
+app.config['MAIL_USE_SSL'] = MAIL_USE_SSL
+app.config['MAIL_USE_TLS'] = MAIL_USE_TLS
+app.config['MAIL_USERNAME'] = MAIL_USERNAME
+app.config['MAIL_PASSWORD'] = MAIL_PASSWORD
+app.config['MAIL_DEFAULT_SENDER'] = MAIL_DEFAULT_SENDER
+mail = Mail(app)
 
 @app.route('/userinfo/createuser', methods=['POST'])
 @db_query(transaction=False)  # Changed to True for data integrity
@@ -277,7 +284,7 @@ def get_healthy_articles(redis):
 @db_query(transaction=False)
 def medicine_reminder_create(**kwargs):
     data = request.json
-    required_fields = ['user_id', 'medicine_name', 'reminder_times']
+    required_fields = ['user_id', 'medicine_name', 'reminder_times', 'email']
 
     if not all(field in data for field in required_fields):
         return jsonify({
@@ -304,6 +311,13 @@ def medicine_reminder_create(**kwargs):
             'message': 'invalid time format，using HH:MM format（example 08:00）'
         })
 
+    if not re.match(r"[^@]+@[^@]+\.[^@]+", data['email']):
+        return jsonify({
+            'status': 'error',
+            'data': {},
+            'message': 'invalid email format'
+        })
+
     cursor = kwargs['cursor']
     insert_data = {
         'user_id': data['user_id'],
@@ -311,6 +325,7 @@ def medicine_reminder_create(**kwargs):
         'reminder_times': data['reminder_times'],
         'start_date': data.get('start_date', datetime.now()),
         'end_date': data.get('end_date', datetime.now()),
+        'email': data['email'],
         'is_active': 1
     }
     placeholders = ', '.join(['%s'] * len(insert_data))
@@ -412,12 +427,20 @@ def medicine_reminder_update(**kwargs):
                 'message': 'invalid time format，using HH:MM format（example 08:00）'
             })
 
+    if 'email' in data:
+        if not re.match(r"[^@]+@[^@]+\.[^@]+", data['email']):
+            return jsonify({
+                'status': 'error',
+                'data': {},
+                'message': 'invalid email format'
+            })
+
     update_fields = []
     update_values = []
 
     updatable_fields = [
         'medicine_name', 'reminder_times', 'dosage', 'frequency',
-        'start_date', 'end_date', 'is_active'
+        'start_date', 'end_date', 'is_active', 'email'
     ]
 
     for field in updatable_fields:
@@ -445,6 +468,7 @@ def medicine_reminder_update(**kwargs):
                 'id': updated_reminder['id'],
                 'medicine_name': updated_reminder['medicine_name'],
                 'reminder_times': updated_reminder['reminder_times'].split(','),
+                'email': updated_reminder['email'],
                 'is_active': bool(updated_reminder['is_active'])
             },
             'message': 'reminder updated successfully'
