@@ -8,7 +8,7 @@ HEALTH_NEWS_CACHE_TTL = 3600  # healthy articles ttl
 # Mysql
 MYSQL_HOST = '127.0.0.1'
 MYSQL_USER= 'root'
-MYSQL_PASSWORD = 'Zuoyi980215!'
+MYSQL_PASSWORD = ''
 MYSQL_DB = 'medibot'
 
 # MongoDB
